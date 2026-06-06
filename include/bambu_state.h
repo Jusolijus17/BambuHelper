@@ -152,7 +152,7 @@ struct PrinterConfig {
   char name[24];              // friendly name
   char cloudUserId[32];       // cloud mode: "u_{uid}" for MQTT username
   CloudRegion region;          // cloud mode: US, EU, or CN server region
-  uint8_t gaugeSlots[6];       // configurable gauge layout (GaugeType values, see settings.h)
+  uint8_t gaugeSlots[3];       // configurable gauge layout (GaugeType values, see settings.h)
 };
 
 struct PrinterSlot {

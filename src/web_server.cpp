@@ -12,6 +12,9 @@
 #include "tasmota.h"
 #include "clock_mode.h"
 #include "clock_pong.h"
+#include <FS.h>
+using namespace fs;
+#include <WiFi.h>
 #include <WebServer.h>
 #include <ArduinoJson.h>
 #include <Update.h>
@@ -20,6 +23,7 @@
 #include <HTTPUpdate.h>
 #include <WiFiClientSecure.h>
 extern const uint8_t rootca_crt_bundle_start[] asm("_binary_x509_crt_bundle_start");
+extern const uint8_t rootca_crt_bundle_end[]   asm("_binary_x509_crt_bundle_end");
 #endif
 
 static WebServer server(80);
@@ -277,18 +281,15 @@ R"rawliteral(
 
       <div style="margin-top:16px;padding-top:12px;border-top:1px solid #30363D">
         <h3 style="color:#58A6FF;font-size:14px;margin-bottom:4px">Gauge Layout</h3>
-        <p style="font-size:12px;color:#8B949E;margin-bottom:10px">Choose which widget goes in each of the 6 display positions. Set any slot to <i>Empty</i> to hide it.</p>
+        <p style="font-size:12px;color:#8B949E;margin-bottom:10px">Choose which widget goes in each of the 3 display positions. Set any slot to <i>Empty</i> to hide it.</p>
         <p style="font-size:11px;color:#58A6FF;margin-bottom:6px">&#9650; Top row</p>
-        <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:6px;margin-bottom:8px">
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:6px;margin-bottom:8px">
           <div><label style="font-size:11px;color:#8B949E">Top-left</label><select id="gs0" class="gauge-slot-sel"></select></div>
-          <div><label style="font-size:11px;color:#8B949E">Top-center</label><select id="gs1" class="gauge-slot-sel"></select></div>
-          <div><label style="font-size:11px;color:#8B949E">Top-right</label><select id="gs2" class="gauge-slot-sel"></select></div>
+          <div><label style="font-size:11px;color:#8B949E">Top-right</label><select id="gs1" class="gauge-slot-sel"></select></div>
         </div>
         <p style="font-size:11px;color:#58A6FF;margin-bottom:6px">&#9660; Bottom row</p>
-        <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:6px">
-          <div><label style="font-size:11px;color:#8B949E">Bot-left</label><select id="gs3" class="gauge-slot-sel"></select></div>
-          <div><label style="font-size:11px;color:#8B949E">Bot-center</label><select id="gs4" class="gauge-slot-sel"></select></div>
-          <div><label style="font-size:11px;color:#8B949E">Bot-right</label><select id="gs5" class="gauge-slot-sel"></select></div>
+        <div style="display:grid;grid-template-columns:1fr;gap:6px">
+          <div><label style="font-size:11px;color:#8B949E">Bot-center</label><select id="gs2" class="gauge-slot-sel"></select></div>
         </div>
         <button type="button" style="margin-top:8px;padding:4px 10px;font-size:11px;background:transparent;color:#8B949E;border:1px solid #30363D;border-radius:4px;cursor:pointer" onclick="resetGaugeLayout()">Reset to default</button>
         <div style="margin-top:12px">
@@ -345,10 +346,15 @@ R"rawliteral(
           <option value="10" %AP_F10%>Show finish screen for 10 minutes</option>
           <option value="custom" %AP_CUSTOM%>Custom duration</option>
           <option value="keepon" %AP_KEEPON%>Keep finish screen visible</option>
+          <option value="bedcool" %AP_BEDCOOL%>Wait until bed cools below X&deg;C</option>
         </select>
         <div id="customMinsWrap" style="display:%CUSTOM_DISP%;margin-top:6px">
           <label for="fmins" style="font-size:12px">Minutes</label>
           <input type="number" id="fmins" min="1" max="999" value="%FMINS%">
+        </div>
+        <div id="bedCoolWrap" style="display:%BEDCOOL_DISP%;margin-top:6px">
+          <label for="bedcooltemp" style="font-size:12px">Bed temperature threshold (&deg;C)</label>
+          <input type="number" id="bedcooltemp" min="20" max="100" value="%BEDCOOLTEMP%">
         </div>
         <div class="check-row" style="margin-top:8px">
           <input type="checkbox" id="dack" value="1" %DACK% onchange="toggleSetting('dack',this.checked)">
@@ -591,6 +597,16 @@ R"rawliteral(
 
       <button type="button" class="btn btn-primary" onclick="saveWifi()">Save WiFi &amp; Restart</button>
 
+      <div style="margin-top:16px;padding-top:12px;border-top:1px solid #30363D">
+        <h3 style="color:#58A6FF;font-size:14px;margin-bottom:10px">Local MQTT Broker</h3>
+        <p style="font-size:11px;color:#8B949E;margin-bottom:10px">Optional — for Homebridge/Home Assistant integration. Leave empty to disable.</p>
+        <label for="lmqhost">Broker Host / IP</label>
+        <input type="text" id="lmqhost" value="%LMQHOST%" placeholder="192.168.2.186">
+        <label for="lmqport">Port</label>
+        <input type="number" id="lmqport" value="%LMQPORT%" min="1" max="65535" placeholder="1883">
+        <p style="font-size:11px;color:#8B949E;margin-top:4px">Topics: <code>bambuhelper/screen/state</code> (publish) &bull; <code>bambuhelper/screen/set</code> (subscribe)</p>
+      </div>
+
       <div style="margin-top:20px;padding-top:12px;border-top:1px solid #30363D">
         <h3 style="color:#58A6FF;font-size:14px;margin-bottom:10px">Settings Backup</h3>
         <p style="font-size:11px;color:#8B949E;margin-bottom:10px">
@@ -812,13 +828,13 @@ var gaugeTypes=[
 })();
 
 function resetGaugeLayout(){
-  var d=[1,2,3,4,5,6];
-  for(var i=0;i<6;i++){var s=document.getElementById('gs'+i);if(s)s.value=d[i];}
+  var d=[2,3,1];
+  for(var i=0;i<3;i++){var s=document.getElementById('gs'+i);if(s)s.value=d[i];}
 }
 function saveGaugeLayout(){
   var p=new URLSearchParams();
   p.append('slot',currentSlot);
-  for(var g=0;g<6;g++){var s=document.getElementById('gs'+g);if(s)p.append('gs'+g,s.value);}
+  for(var g=0;g<3;g++){var s=document.getElementById('gs'+g);if(s)p.append('gs'+g,s.value);}
   fetch('/save/gaugelayout',{method:'POST',headers:{'Content-Type':'application/x-www-form-urlencoded'},body:p.toString()})
     .then(function(r){return r.json();})
     .then(function(d){if(d.status==='ok')showToast('Gauge layout saved!');else showToast('Error');})
@@ -846,7 +862,7 @@ function selectPrinterTab(slot){
     document.getElementById('cl_pname').value=d.name||'';
     document.getElementById('region').value=d.region||'us';
     document.getElementById('cl_token').value='';
-    if(d.gaugeSlots){for(var g=0;g<6;g++){var sel=document.getElementById('gs'+g);if(sel)sel.value=d.gaugeSlots[g]||0;}}
+    if(d.gaugeSlots){for(var g=0;g<3;g++){var sel=document.getElementById('gs'+g);if(sel)sel.value=d.gaugeSlots[g]||0;}}
     toggleConnMode();
     var ps=document.getElementById('printerStatus');
     if(d.connected){ps.className='status status-ok';ps.textContent='Connected';}
@@ -971,6 +987,8 @@ function saveWifi(){
   p.append('net_dns',dns);
   p.append('has_showip','1');
   if(document.getElementById('showip').checked) p.append('showip','1');
+  p.append('lmqhost',document.getElementById('lmqhost').value.trim());
+  p.append('lmqport',document.getElementById('lmqport').value.trim()||'1883');
   fetch('/save/wifi',{method:'POST',headers:{'Content-Type':'application/x-www-form-urlencoded'},body:p.toString()})
     .then(readJsonResponse)
     .then(function(d){
@@ -1112,6 +1130,7 @@ function applyDisplay(){
   var ap=document.getElementById('afterprint').value;
   if(ap==='keepon'){p.append('keepon','1');p.append('fmins','0');}
   else if(ap==='custom'){p.append('fmins',document.getElementById('fmins').value);p.append('clock','1');}
+  else if(ap==='bedcool'){p.append('bedcool','1');p.append('bedcooltemp',document.getElementById('bedcooltemp').value);p.append('clock','1');p.append('fmins','0');}
   else{p.append('fmins',ap);p.append('clock','1');}
   if(document.getElementById('dack').checked) p.append('dack','1');
   if(document.getElementById('abar').checked) p.append('abar','1');
@@ -1465,6 +1484,7 @@ R"rawliteral(
 function toggleAfterPrint(){
   var v=document.getElementById('afterprint').value;
   document.getElementById('customMinsWrap').style.display=(v==='custom')?'block':'none';
+  document.getElementById('bedCoolWrap').style.display=(v==='bedcool')?'block':'none';
   var pong=document.getElementById('pong');
   var row=document.getElementById('pong-row');
   var showClock=(v!=='keepon');
@@ -1547,6 +1567,8 @@ static bool resolvePlaceholder(const char* name, String& out) {
   if (strcmp(name, "NET_IP") == 0)     { out = netSettings.staticIP; return true; }
   if (strcmp(name, "NET_GW") == 0)     { out = netSettings.gateway; return true; }
   if (strcmp(name, "NET_SN") == 0)     { out = netSettings.subnet; return true; }
+  if (strcmp(name, "LMQHOST") == 0)    { out = netSettings.localMqttHost; return true; }
+  if (strcmp(name, "LMQPORT") == 0)    { out = String(netSettings.localMqttPort); return true; }
   if (strcmp(name, "NET_DNS") == 0)    { out = netSettings.dns; return true; }
   if (strcmp(name, "SHOWIP") == 0)     { out = netSettings.showIPAtStartup ? "checked" : ""; return true; }
 
@@ -1567,16 +1589,20 @@ static bool resolvePlaceholder(const char* name, String& out) {
   // --- After-print ---
   {
     uint16_t fm = dpSettings.finishDisplayMins;
-    bool keepon = dpSettings.keepDisplayOn;
-    bool isPreset = (!keepon && (fm == 0 || fm == 1 || fm == 3 || fm == 5 || fm == 10));
-    if (strcmp(name, "AP_CLOCK0") == 0)    { out = (!keepon && fm == 0) ? "selected" : ""; return true; }
-    if (strcmp(name, "AP_F1") == 0)        { out = (!keepon && fm == 1) ? "selected" : ""; return true; }
-    if (strcmp(name, "AP_F3") == 0)        { out = (!keepon && fm == 3) ? "selected" : ""; return true; }
-    if (strcmp(name, "AP_F5") == 0)        { out = (!keepon && fm == 5) ? "selected" : ""; return true; }
-    if (strcmp(name, "AP_F10") == 0)       { out = (!keepon && fm == 10) ? "selected" : ""; return true; }
-    if (strcmp(name, "AP_CUSTOM") == 0)    { out = (!keepon && !isPreset && fm > 0) ? "selected" : ""; return true; }
+    bool keepon  = dpSettings.keepDisplayOn;
+    bool bedcool = dpSettings.waitBedCool;
+    bool isPreset = (!keepon && !bedcool && (fm == 0 || fm == 1 || fm == 3 || fm == 5 || fm == 10));
+    if (strcmp(name, "AP_CLOCK0") == 0)    { out = (!keepon && !bedcool && fm == 0) ? "selected" : ""; return true; }
+    if (strcmp(name, "AP_F1") == 0)        { out = (!keepon && !bedcool && fm == 1) ? "selected" : ""; return true; }
+    if (strcmp(name, "AP_F3") == 0)        { out = (!keepon && !bedcool && fm == 3) ? "selected" : ""; return true; }
+    if (strcmp(name, "AP_F5") == 0)        { out = (!keepon && !bedcool && fm == 5) ? "selected" : ""; return true; }
+    if (strcmp(name, "AP_F10") == 0)       { out = (!keepon && !bedcool && fm == 10) ? "selected" : ""; return true; }
+    if (strcmp(name, "AP_CUSTOM") == 0)    { out = (!keepon && !bedcool && !isPreset && fm > 0) ? "selected" : ""; return true; }
     if (strcmp(name, "AP_KEEPON") == 0)    { out = keepon ? "selected" : ""; return true; }
-    if (strcmp(name, "CUSTOM_DISP") == 0)  { out = (!keepon && !isPreset && fm > 0) ? "block" : "none"; return true; }
+    if (strcmp(name, "AP_BEDCOOL") == 0)   { out = bedcool ? "selected" : ""; return true; }
+    if (strcmp(name, "CUSTOM_DISP") == 0)  { out = (!keepon && !bedcool && !isPreset && fm > 0) ? "block" : "none"; return true; }
+    if (strcmp(name, "BEDCOOL_DISP") == 0) { out = bedcool ? "block" : "none"; return true; }
+    if (strcmp(name, "BEDCOOLTEMP") == 0)  { out = String(dpSettings.bedCoolTemp); return true; }
     if (strcmp(name, "FMINS") == 0)        { out = String(fm); return true; }
   }
 
@@ -1859,6 +1885,11 @@ static void readDisplayFromForm() {
   dpSettings.showClockAfterFinish = server.hasArg("clock");
   dpSettings.doorAckEnabled = server.hasArg("dack");
   dpSettings.keepPrintScreen = server.hasArg("kps");
+  dpSettings.waitBedCool = server.hasArg("bedcool");
+  if (server.hasArg("bedcooltemp")) {
+    int t = server.arg("bedcooltemp").toInt();
+    dpSettings.bedCoolTemp = (t >= 20 && t <= 100) ? (uint8_t)t : 40;
+  }
   dispSettings.animatedBar = server.hasArg("abar");
   dispSettings.pongClock = server.hasArg("pong");
   dispSettings.smallLabels = server.hasArg("slbl");
@@ -2010,6 +2041,8 @@ static void handleSaveWifi() {
   if (server.hasArg("net_dns")) strlcpy(netSettings.dns, server.arg("net_dns").c_str(), sizeof(netSettings.dns));
   if (server.hasArg("has_showip"))  // full page sends this; AP page doesn't
     netSettings.showIPAtStartup = server.hasArg("showip");
+  if (server.hasArg("lmqhost")) strlcpy(netSettings.localMqttHost, server.arg("lmqhost").c_str(), sizeof(netSettings.localMqttHost));
+  if (server.hasArg("lmqport")) netSettings.localMqttPort = (uint16_t)server.arg("lmqport").toInt();
 
   saveSettings();
 
@@ -2066,7 +2099,8 @@ static void handleStatus() {
   doc["fan"] = st.coolingFanPct;
   doc["layer"] = st.layerNum;
   doc["layers"] = st.totalLayers;
-  doc["display_off"] = (getScreenState() == SCREEN_OFF);
+  doc["display_off"]   = (getScreenState() == SCREEN_OFF);
+  doc["display_night"] = (getScreenState() == SCREEN_NIGHT);
 
   String json;
   serializeJson(doc, json);
@@ -2150,6 +2184,27 @@ static void handleDebugToggle() {
     mqttDebugLog = (server.arg("on") == "1");
   }
   server.send(200, "text/plain", mqttDebugLog ? "ON" : "OFF");
+}
+
+static void handleScreenControl() {
+  if (!server.hasArg("state")) {
+    server.send(400, "text/plain", "Missing state");
+    return;
+  }
+  String state = server.arg("state");
+  if (state == "off") {
+    setBacklight(0);
+    setScreenState(SCREEN_OFF);
+  } else if (state == "on") {
+    setBacklight(getEffectiveBrightness());
+    setScreenState(SCREEN_IDLE);  // state machine corrects to actual state on next loop
+  } else if (state == "night") {
+    setScreenState(SCREEN_NIGHT);
+  } else {
+    server.send(400, "text/plain", "Invalid state");
+    return;
+  }
+  server.send(200, "text/plain", "OK");
 }
 
 static void handleToggleSetting() {
@@ -2371,6 +2426,8 @@ static void handleSettingsExport() {
   dp["keepDisplayOn"] = dpSettings.keepDisplayOn;
   dp["showClockAfterFinish"] = dpSettings.showClockAfterFinish;
   dp["doorAckEnabled"] = dpSettings.doorAckEnabled;
+  dp["waitBedCool"] = dpSettings.waitBedCool;
+  dp["bedCoolTemp"] = dpSettings.bedCoolTemp;
   dp["nightModeEnabled"] = dpSettings.nightModeEnabled;
   dp["nightStartHour"] = dpSettings.nightStartHour;
   dp["nightEndHour"] = dpSettings.nightEndHour;
@@ -2501,8 +2558,7 @@ static void handleSettingsImportFinish() {
       JsonArray slots = p["gaugeSlots"];
       if (slots && slots.size() == GAUGE_SLOT_COUNT) {
         static const uint8_t defSlots[GAUGE_SLOT_COUNT] = {
-          GAUGE_PROGRESS, GAUGE_NOZZLE, GAUGE_BED,
-          GAUGE_PART_FAN, GAUGE_AUX_FAN, GAUGE_CHAMBER_FAN
+          GAUGE_NOZZLE, GAUGE_BED, GAUGE_PROGRESS
         };
         for (uint8_t g = 0; g < GAUGE_SLOT_COUNT; g++) {
           uint8_t v = slots[g].as<uint8_t>();
@@ -2546,6 +2602,8 @@ static void handleSettingsImportFinish() {
     if (dp["keepDisplayOn"].is<bool>())         dpSettings.keepDisplayOn = dp["keepDisplayOn"].as<bool>();
     if (dp["showClockAfterFinish"].is<bool>())  dpSettings.showClockAfterFinish = dp["showClockAfterFinish"].as<bool>();
     if (dp["doorAckEnabled"].is<bool>())        dpSettings.doorAckEnabled = dp["doorAckEnabled"].as<bool>();
+    if (dp["waitBedCool"].is<bool>())           dpSettings.waitBedCool = dp["waitBedCool"].as<bool>();
+    if (dp["bedCoolTemp"].is<uint8_t>())        dpSettings.bedCoolTemp = dp["bedCoolTemp"].as<uint8_t>();
     if (dp["nightModeEnabled"].is<bool>())      dpSettings.nightModeEnabled = dp["nightModeEnabled"].as<bool>();
     if (dp["nightStartHour"].is<uint8_t>())     dpSettings.nightStartHour = dp["nightStartHour"].as<uint8_t>();
     if (dp["nightEndHour"].is<uint8_t>())       dpSettings.nightEndHour = dp["nightEndHour"].as<uint8_t>();
@@ -2629,7 +2687,7 @@ static void otaAutoTaskFn(void* param) {
   otaAutoStatus = "downloading";
 
   WiFiClientSecure client;
-  client.setCACertBundle(rootca_crt_bundle_start);
+  client.setCACertBundle(rootca_crt_bundle_start, rootca_crt_bundle_end - rootca_crt_bundle_start);
 
   httpUpdate.setFollowRedirects(HTTPC_FORCE_FOLLOW_REDIRECTS);
   httpUpdate.onProgress([](int cur, int total) {
@@ -2842,6 +2900,8 @@ void initWebServer() {
   server.on("/reset", HTTP_GET, handleReset);
   server.on("/debug", HTTP_GET, handleDebug);
   server.on("/debug/toggle", HTTP_POST, handleDebugToggle);
+  server.on("/screen", HTTP_POST, handleScreenControl);
+  server.on("/screen", HTTP_GET,  handleScreenControl);
   server.on("/save/toggle", HTTP_POST, handleToggleSetting);
   server.on("/cloud/logout", HTTP_POST, handleCloudLogout);
   server.on("/settings/export", HTTP_GET, handleSettingsExport);

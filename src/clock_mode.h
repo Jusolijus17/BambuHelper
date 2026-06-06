@@ -3,5 +3,6 @@
 
 void drawClock();
 void resetClock();
+void setClockNightMode(bool night);
 
 #endif // CLOCK_MODE_H

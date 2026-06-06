@@ -10,8 +10,12 @@
 #include "bambu_mqtt.h"
 #include "settings.h"
 #include "tasmota.h"
+#include "local_mqtt.h"
 #include <WiFi.h>
 #include <time.h>
+#ifdef CONFIG_IDF_TARGET_ESP32C3
+#include <SPI.h>
+#endif
 
 TFT_eSPI tft = TFT_eSPI();
 
@@ -104,6 +108,11 @@ void initDisplay() {
   delay(500);
   Serial.println("Display: calling tft.init()...");
   Serial.flush();
+#ifdef CONFIG_IDF_TARGET_ESP32C3
+  // Pre-initialize SPI via Arduino SPI library so the GPIO matrix is configured
+  // correctly for C3 before TFT_eSPI takes over the peripheral registers.
+  SPI.begin(TFT_SCLK, -1, TFT_MOSI, TFT_CS);
+#endif
   tft.init();  // TFT_eSPI configures SPI from build flags
   Serial.println("Display: tft.init() done");
 #if defined(DISPLAY_240x320)
@@ -129,6 +138,7 @@ void initDisplay() {
 
 #if defined(BACKLIGHT_PIN) && BACKLIGHT_PIN >= 0
   pinMode(BACKLIGHT_PIN, OUTPUT);
+  digitalWrite(BACKLIGHT_PIN, HIGH);  // force ON first; analogWrite/LEDC applied after
   setBacklight(200);
 #endif
 
@@ -177,6 +187,10 @@ void triggerDisplayTransition() {
 
 void setScreenState(ScreenState state) {
   currentScreen = state;
+  const char* mqttState = (state == SCREEN_OFF)   ? "off"
+                        : (state == SCREEN_NIGHT)  ? "night"
+                        :                            "on";
+  localMqttPublishScreen(mqttState);
 }
 
 ScreenState getScreenState() {
@@ -1287,11 +1301,11 @@ static void drawPrinting() {
     }
   }
 
-  // === Configurable 2x3 gauge grid ===
+  // === Configurable 3-gauge layout: [Nozzle, Bed] top row + [Progress] bottom-center ===
   {
-    static const int16_t slotX[GAUGE_SLOT_COUNT] = { LY_COL1, LY_COL2, LY_COL3, LY_COL1, LY_COL2, LY_COL3 };
-    static const int16_t slotY[GAUGE_SLOT_COUNT] = { LY_ROW1, LY_ROW1, LY_ROW1, LY_ROW2, LY_ROW2, LY_ROW2 };
-    static uint8_t prevSlotTypes[GAUGE_SLOT_COUNT] = { 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF };
+    static const int16_t slotX[GAUGE_SLOT_COUNT] = { LY_COL1, LY_COL2, LY_COL_CENTER };
+    static const int16_t slotY[GAUGE_SLOT_COUNT] = { LY_ROW1, LY_ROW1, LY_ROW2 };
+    static uint8_t prevSlotTypes[GAUGE_SLOT_COUNT] = { 0xFF, 0xFF, 0xFF };
 
     for (uint8_t si = 0; si < GAUGE_SLOT_COUNT; si++) {
       uint8_t gt = p.config.gaugeSlots[si];
@@ -1810,6 +1824,7 @@ static bool isNightHour() {
 }
 
 uint8_t getEffectiveBrightness() {
+  if (currentScreen == SCREEN_NIGHT) return 1;
   if (currentScreen == SCREEN_CLOCK) {
     // During night hours, use the dimmer of the two
     if (dpSettings.nightModeEnabled && isNightHour()) {
@@ -1829,8 +1844,8 @@ void checkNightMode() {
   if (now - lastNightCheck < 60000) return;
   lastNightCheck = now;
 
-  // Don't interfere with screen off
-  if (currentScreen == SCREEN_OFF) return;
+  // Don't interfere with forced-off screens
+  if (currentScreen == SCREEN_OFF || currentScreen == SCREEN_NIGHT) return;
 
   uint8_t target = getEffectiveBrightness();
   if (target != lastAppliedBrightness) {
@@ -1873,14 +1888,15 @@ void updateDisplay() {
 
   // Detect screen change
   if (currentScreen != prevScreen) {
-    // Restore backlight when leaving SCREEN_OFF or SCREEN_CLOCK
-    if ((prevScreen == SCREEN_OFF || prevScreen == SCREEN_CLOCK) &&
-        currentScreen != SCREEN_OFF && currentScreen != SCREEN_CLOCK) {
+    // Restore backlight when leaving a dark screen
+    if ((prevScreen == SCREEN_OFF || prevScreen == SCREEN_CLOCK || prevScreen == SCREEN_NIGHT) &&
+        currentScreen != SCREEN_OFF && currentScreen != SCREEN_CLOCK && currentScreen != SCREEN_NIGHT) {
+      setClockNightMode(false);
       setBacklight(getEffectiveBrightness());
     }
     // Reset text size in case Pong clock left it scaled up
     tft.setTextSize(1);
-    tft.fillScreen(currentScreen == SCREEN_OFF ? TFT_BLACK : dispSettings.bgColor);
+    tft.fillScreen((currentScreen == SCREEN_OFF || currentScreen == SCREEN_NIGHT) ? TFT_BLACK : dispSettings.bgColor);
     forceRedraw = true;
     if (currentScreen == SCREEN_CONNECTING_WIFI || currentScreen == SCREEN_CONNECTING_MQTT) {
       connectScreenStart = millis();
@@ -1888,7 +1904,13 @@ void updateDisplay() {
     if (currentScreen == SCREEN_CLOCK) {
       if (dispSettings.pongClock) resetPongClock();
       else resetClock();
-      setBacklight(getEffectiveBrightness());  // dim for screensaver
+      setClockNightMode(false);
+      setBacklight(getEffectiveBrightness());
+    }
+    if (currentScreen == SCREEN_NIGHT) {
+      resetClock();
+      setClockNightMode(true);
+      setBacklight(1);  // minimum visible dans le noir — backlight 0 = rien visible
     }
     prevScreen = currentScreen;
   }
@@ -1935,6 +1957,10 @@ void updateDisplay() {
     case SCREEN_CLOCK:
       if (!dispSettings.pongClock) drawClock();
       // Pong clock is ticked before the throttle (above)
+      break;
+
+    case SCREEN_NIGHT:
+      drawClock();
       break;
 
     case SCREEN_OFF:

@@ -20,14 +20,14 @@
 #define LY_HDR_BADGE_RX 8       // badge right margin from SCREEN_W
 #define LY_HDR_DOT_CY   10      // multi-printer indicator dot Y
 
-// --- Printing: 2x3 gauge grid ---
-#define LY_GAUGE_R   32      // radius for all gauges
-#define LY_GAUGE_T   6       // progress arc thickness
-#define LY_COL1      42      // left column center X
-#define LY_COL2      120     // middle column center X
-#define LY_COL3      198     // right column center X
-#define LY_ROW1      60      // row 1 center Y
-#define LY_ROW2      148     // row 2 center Y
+// --- Printing: 3-gauge layout (top: 2 cols, bottom: 1 centered) ---
+#define LY_GAUGE_R      34      // radius for all gauges (max for 240x240 with ETA at y=190)
+#define LY_GAUGE_T      6       // progress arc thickness
+#define LY_COL1         38      // top-row left gauge center X
+#define LY_COL2         202     // top-row right gauge center X
+#define LY_COL_CENTER   120     // bottom-row single gauge center X
+#define LY_ROW1         62      // row 1 center Y
+#define LY_ROW2         143     // row 2 center Y
 
 // --- Printing: ETA / info zone ---
 #define LY_ETA_Y        190

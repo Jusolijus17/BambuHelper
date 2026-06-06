@@ -13,6 +13,12 @@
 #define CLK_TIME_W    (4 * CLK_DIGIT_W + CLK_COLON_W)
 #define CLK_TIME_X    ((LY_W - CLK_TIME_W) / 2)
 
+static bool nightMode = false;
+
+void setClockNightMode(bool night) {
+  nightMode = night;
+}
+
 static int prevMinute = -1;
 static char prevDigits[5] = {0, 0, 0, 0, 0};
 static bool prevColon = false;
@@ -42,9 +48,9 @@ void drawClock() {
     localtime_r(&t, &now);
   }
 
-  uint16_t bg = dispSettings.bgColor;
-  uint16_t timeClr = dispSettings.clockTimeColor;
-  uint16_t dateClr = dispSettings.clockDateColor;
+  uint16_t bg      = nightMode ? TFT_BLACK               : dispSettings.bgColor;
+  uint16_t timeClr = nightMode ? TFT_RED                  : dispSettings.clockTimeColor;
+  uint16_t dateClr = nightMode ? tft.color565(120, 0, 0) : dispSettings.clockDateColor;
 
   // --- Colon blink (every call, ~250ms) ---
   bool colonOn = (millis() % 1000) < 500;

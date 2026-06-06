@@ -130,14 +130,11 @@ void defaultDisplaySettings(DisplaySettings& ds) {
   ds.heatbreak = { CLR_ORANGE, CLR_ORANGE, CLR_TEXT };
 }
 
-// Default gauge slot layout: Progress, Nozzle, Bed, Part Fan, Aux Fan, Chamber Fan
+// Default gauge slot layout: Nozzle (top-left), Bed (top-right), Progress (bottom-center)
 static void defaultGaugeSlots(uint8_t* slots) {
-  slots[0] = GAUGE_PROGRESS;
-  slots[1] = GAUGE_NOZZLE;
-  slots[2] = GAUGE_BED;
-  slots[3] = GAUGE_PART_FAN;
-  slots[4] = GAUGE_AUX_FAN;
-  slots[5] = GAUGE_CHAMBER_FAN;
+  slots[0] = GAUGE_NOZZLE;
+  slots[1] = GAUGE_BED;
+  slots[2] = GAUGE_PROGRESS;
 }
 
 // ---------------------------------------------------------------------------
@@ -301,6 +298,8 @@ void loadSettings() {
 
   netSettings.use24h = prefs.getBool("net_24h", true);
   netSettings.dateFormat = prefs.getUChar("net_datefmt", 0);
+  strlcpy(netSettings.localMqttHost, prefs.getString("net_lmqhost", "").c_str(), sizeof(netSettings.localMqttHost));
+  netSettings.localMqttPort = prefs.getUShort("net_lmqport", 1883);
 
   // Display power settings
   dpSettings.finishDisplayMins = prefs.getUShort("dp_fmins", 3);
@@ -313,6 +312,8 @@ void loadSettings() {
   dpSettings.nightEndHour = prefs.getUChar("dp_nend", 7);
   dpSettings.nightBrightness = prefs.getUChar("dp_nbright", 30);
   dpSettings.screensaverBrightness = prefs.getUChar("dp_ssbright", 30);
+  dpSettings.waitBedCool = prefs.getBool("dp_bedcool", false);
+  dpSettings.bedCoolTemp = prefs.getUChar("dp_bedcooltemp", 40);
 
   // Rotation settings (multi-printer)
   rotState.mode = (RotateMode)prefs.getUChar("rot_mode", ROTATE_SMART);
@@ -397,6 +398,8 @@ void saveSettings() {
   prefs.putUChar("net_tzidx", netSettings.timezoneIndex);
   prefs.putBool("net_24h", netSettings.use24h);
   prefs.putUChar("net_datefmt", netSettings.dateFormat);
+  prefs.putString("net_lmqhost", netSettings.localMqttHost);
+  prefs.putUShort("net_lmqport", netSettings.localMqttPort);
 
   // Display power settings
   prefs.putUShort("dp_fmins", dpSettings.finishDisplayMins);
@@ -409,6 +412,8 @@ void saveSettings() {
   prefs.putUChar("dp_nend", dpSettings.nightEndHour);
   prefs.putUChar("dp_nbright", dpSettings.nightBrightness);
   prefs.putUChar("dp_ssbright", dpSettings.screensaverBrightness);
+  prefs.putBool("dp_bedcool", dpSettings.waitBedCool);
+  prefs.putUChar("dp_bedcooltemp", dpSettings.bedCoolTemp);
 
   // Tasmota power monitoring
   prefs.putBool("tsm_en", tasmotaSettings.enabled);

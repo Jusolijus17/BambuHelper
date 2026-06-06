@@ -4,6 +4,7 @@
 #include "wifi_manager.h"
 #include "web_server.h"
 #include "bambu_mqtt.h"
+#include "local_mqtt.h"
 #include "config.h"
 #include "bambu_state.h"
 #include "button.h"
@@ -48,7 +49,7 @@ static bool anyPrinterDrying() {
 }
 
 static bool isSleepStickyScreen(ScreenState state) {
-  return state == SCREEN_CLOCK || state == SCREEN_OFF;
+  return state == SCREEN_CLOCK || state == SCREEN_OFF || state == SCREEN_NIGHT;
 }
 
 static bool isDisplayedPrinterAssignedToTasmota() {
@@ -71,6 +72,7 @@ static bool handleSplashPhase() {
     initWiFi();
     initWebServer();
     initBambuMqtt();
+    initLocalMqtt();
     initButton();
     initBuzzer();
     tasmotaInit();
@@ -291,9 +293,10 @@ static void handleDisplaySleepTimeouts() {
   if ((cur == SCREEN_FINISHED || (cur == SCREEN_PRINTING && dpSettings.keepPrintScreen)) &&
       !dpSettings.keepDisplayOn && finishActive) {
     BambuState& fs = displayedPrinter().state;
-    bool waitingForDoor = dpSettings.doorAckEnabled && fs.doorSensorPresent &&
-                          !fs.doorAcknowledged;
-    if (!waitingForDoor) {
+    bool waitingForDoor    = dpSettings.doorAckEnabled && fs.doorSensorPresent &&
+                             !fs.doorAcknowledged;
+    bool waitingForBedCool = dpSettings.waitBedCool && (fs.bedTemp > (float)dpSettings.bedCoolTemp);
+    if (!waitingForDoor && !waitingForBedCool) {
       bool timeoutReached = (dpSettings.finishDisplayMins > 0) &&
           (millis() - finishScreenStart > (unsigned long)dpSettings.finishDisplayMins * 60000UL);
       bool immediateClockTransition = (dpSettings.finishDisplayMins == 0) &&
@@ -472,6 +475,7 @@ void loop() {
 
   buzzerTick();
   checkNightMode();
+  loopLocalMqtt();
   updateDisplay();
 
   // MQTT and rotation after display update - TLS reconnect can block for

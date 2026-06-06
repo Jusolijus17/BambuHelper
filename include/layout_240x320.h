@@ -20,20 +20,20 @@
 #define LY_HDR_BADGE_RX 8
 #define LY_HDR_DOT_CY   10
 
-// --- Printing: 2x3 gauge grid (same as default) ---
-#define LY_GAUGE_R   32
-#define LY_GAUGE_T   6
-#define LY_COL1      42
-#define LY_COL2      120
-#define LY_COL3      198
-#define LY_ROW1      60
-#define LY_ROW2      148
+// --- Printing: 3-gauge layout (top: 2 cols, bottom: 1 centered) ---
+#define LY_GAUGE_R      42
+#define LY_GAUGE_T      6
+#define LY_COL1         44
+#define LY_COL2         196
+#define LY_COL_CENTER   120
+#define LY_ROW1         72
+#define LY_ROW2         169
 
-// --- AMS tray visualization zone (CYD portrait, between gauges and ETA) ---
-// Gauge row 2 labels extend to ~y=187, so AMS starts at 190 to avoid overlap.
-#define LY_AMS_Y          190   // top of AMS zone (below gauge row 2 labels)
-#define LY_AMS_H          56    // total height (190+56=246, 4px gap before ETA at 250)
-#define LY_AMS_BAR_H      32    // color bar height
+// --- AMS tray visualization zone (portrait, between gauges and ETA) ---
+// Gauge row 2 labels end at ~y=224, AMS starts at 226.
+#define LY_AMS_Y          226   // top of AMS zone (below gauge row 2 labels)
+#define LY_AMS_H          32    // total height (compressed to fit before ETA at 260)
+#define LY_AMS_BAR_H      22    // color bar height
 #define LY_AMS_BAR_GAP    2     // gap between bars within one AMS
 #define LY_AMS_GROUP_GAP  8     // gap between AMS unit groups
 #define LY_AMS_LABEL_OFFY 4     // label offset below bars
@@ -45,9 +45,9 @@
 // Right 80px: AMS vertical strip
 // ETA + bottom bar use 240x240-style Y to fit within 240px height.
 #define LY_LAND_GAUGE_W     240   // gauge area width (left side)
-#define LY_LAND_ETA_Y       190   // ETA zone Y (same as default 240x240)
-#define LY_LAND_ETA_H       30
-#define LY_LAND_ETA_TEXT_Y  207
+#define LY_LAND_ETA_Y       202   // ETA zone Y (pushed down for larger gauges)
+#define LY_LAND_ETA_H       18
+#define LY_LAND_ETA_TEXT_Y  213
 #define LY_LAND_BOT_Y       222   // bottom status bar Y
 #define LY_LAND_BOT_H       18
 #define LY_LAND_BOT_CY      232
