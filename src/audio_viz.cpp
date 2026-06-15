@@ -18,7 +18,7 @@ static volatile unsigned long rxLastMs = 0;
 static const uint8_t BCAST_ADDR[6] = { 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF };
 
 #define BEACON_INTERVAL_MS  250    // how often we advertise our channel
-#define AUDIO_TIMEOUT_MS    1500   // no packet for this long -> "music stopped"
+#define AUDIO_TIMEOUT_MS    30000   // no packet for this long -> "music stopped"
 
 static unsigned long lastBeaconMs = 0;
 static bool          espNowReady  = false;
@@ -156,20 +156,25 @@ void drawVisualizer() {
       tft.fillRect(x, LY_H - drawnBar[i], drawW, drawnBar[i] - newBar, bg);
     }
 
-    // --- Peak marker (2px) ---
-    if (drawnPeak[i] != newPeak) {
-      // erase old marker: restore bar color if it now sits inside the bar, else bg
+    // --- Peak marker (2px white line that floats above the bar) ---
+    // Erase the previous marker when it moved, or when the bar has caught up to
+    // it (merged into the bar) so it never gets stranded in the bar color.
+    bool merged = (newPeak <= newBar);
+    if (drawnPeak[i] != newPeak || merged) {
       int oldY = LY_H - drawnPeak[i] - 1;
       if (oldY < 0) oldY = 0;
+      // restore bar color if the old marker now sits inside the bar, else bg
       tft.fillRect(x, oldY, drawW, 2, (drawnPeak[i] <= newBar) ? bandColor[i] : bg);
     }
-    if (newPeak > newBar) {
+    if (!merged) {
       int py = LY_H - newPeak - 1;
       if (py < 0) py = 0;
       tft.fillRect(x, py, drawW, 2, TFT_WHITE);
+      drawnPeak[i] = newPeak;
+    } else {
+      drawnPeak[i] = newBar;   // marker merged into the bar top
     }
 
-    drawnBar[i]  = newBar;
-    drawnPeak[i] = newPeak;
+    drawnBar[i] = newBar;
   }
 }
