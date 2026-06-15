@@ -10,6 +10,7 @@
 #include "button.h"
 #include "buzzer.h"
 #include "tasmota.h"
+#include "audio_viz.h"
 #include <esp_sleep.h>
 #include <driver/gpio.h>
 
@@ -49,7 +50,8 @@ static bool anyPrinterDrying() {
 }
 
 static bool isSleepStickyScreen(ScreenState state) {
-  return state == SCREEN_CLOCK || state == SCREEN_OFF || state == SCREEN_NIGHT;
+  return state == SCREEN_CLOCK || state == SCREEN_OFF || state == SCREEN_NIGHT ||
+         state == SCREEN_VISUALIZER;
 }
 
 static bool isDisplayedPrinterAssignedToTasmota() {
@@ -76,6 +78,7 @@ static bool handleSplashPhase() {
     initButton();
     initBuzzer();
     tasmotaInit();
+    initAudioViz();
   }
 
   if (splashEnd > 0) {
@@ -197,6 +200,8 @@ static void handleDisplayedPrinterFinishState(ScreenState current, BambuState& s
     }
   }
 
+  Serial.print("Print finished...");
+
   // Door acknowledge: wait for door open before starting timeout
   bool waitingForDoor = dpSettings.doorAckEnabled && s.doorSensorPresent &&
                         !s.doorAcknowledged;
@@ -310,7 +315,7 @@ static void handleDisplaySleepTimeouts() {
 
   if ((cur == SCREEN_IDLE || cur == SCREEN_CONNECTING_MQTT ||
        (cur == SCREEN_PRINTING && dpSettings.keepPrintScreen)) &&
-      !dpSettings.keepDisplayOn && dpSettings.finishDisplayMins > 0) {
+      !dpSettings.keepDisplayOn && (dpSettings.finishDisplayMins > 0 || dpSettings.waitBedCool)) {
     // Don't sleep while AMS is drying - the drying screen is useful
     if (!anyPrinterPrinting() && !anyPrinterDrying()) {
       if (!idleClockActive) {
@@ -325,6 +330,18 @@ static void handleDisplaySleepTimeouts() {
     }
   } else if (cur != SCREEN_IDLE && cur != SCREEN_CONNECTING_MQTT) {
     idleClockActive = false;
+  }
+}
+
+// Swap the clock for the audio visualizer while music is streaming, and back
+// to the clock when it stops. Only acts from the (sticky) clock screen so it
+// never overrides printing/idle/finished screens.
+static void handleAudioVisualizer() {
+  ScreenState cur = getScreenState();
+  if (cur == SCREEN_CLOCK && audioVizActive()) {
+    setScreenState(SCREEN_VISUALIZER);
+  } else if (cur == SCREEN_VISUALIZER && !audioVizActive()) {
+    setScreenState(SCREEN_CLOCK);
   }
 }
 
@@ -471,11 +488,13 @@ void loop() {
 
   handleDisplaySleepTimeouts();
   handleConnectingScreenRecovery();
+  handleAudioVisualizer();
   handleErrorBuzzers();
 
   buzzerTick();
   checkNightMode();
   loopLocalMqtt();
+  audioVizLoop();
   updateDisplay();
 
   // MQTT and rotation after display update - TLS reconnect can block for

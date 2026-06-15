@@ -15,7 +15,8 @@ enum ScreenState {
   SCREEN_CLOCK,
   SCREEN_OFF,
   SCREEN_NIGHT,
-  SCREEN_OTA_UPDATE
+  SCREEN_OTA_UPDATE,
+  SCREEN_VISUALIZER   // audio spectrum visualizer (replaces clock when music plays)
 };
 
 extern TFT_eSPI tft;

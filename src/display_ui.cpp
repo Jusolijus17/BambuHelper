@@ -3,6 +3,7 @@
 #include "display_anim.h"
 #include "clock_mode.h"
 #include "clock_pong.h"
+#include "audio_viz.h"
 #include "icons.h"
 #include "config.h"
 #include "layout.h"
@@ -1880,6 +1881,15 @@ void updateDisplay() {
   if (currentScreen == SCREEN_CLOCK && dispSettings.pongClock) {
     tickPongClock();
   }
+  // Audio visualizer runs at ~30fps, independent of display refresh
+  if (currentScreen == SCREEN_VISUALIZER) {
+    static unsigned long lastVizMs = 0;
+    unsigned long nv = millis();
+    if (nv - lastVizMs >= 33) {
+      lastVizMs = nv;
+      drawVisualizer();
+    }
+  }
 
   unsigned long now = millis();
   unsigned long interval = gaugesAnimating ? GAUGE_ANIM_MS : DISPLAY_UPDATE_MS;
@@ -1911,6 +1921,10 @@ void updateDisplay() {
       resetClock();
       setClockNightMode(true);
       setBacklight(1);  // minimum visible dans le noir — backlight 0 = rien visible
+    }
+    if (currentScreen == SCREEN_VISUALIZER) {
+      resetVisualizer();
+      setBacklight(getEffectiveBrightness());
     }
     prevScreen = currentScreen;
   }
@@ -1957,6 +1971,10 @@ void updateDisplay() {
     case SCREEN_CLOCK:
       if (!dispSettings.pongClock) drawClock();
       // Pong clock is ticked before the throttle (above)
+      break;
+
+    case SCREEN_VISUALIZER:
+      // Drawn by the ~30fps tick before the throttle (above)
       break;
 
     case SCREEN_NIGHT:
