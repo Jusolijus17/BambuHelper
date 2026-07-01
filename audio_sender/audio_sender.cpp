@@ -56,6 +56,12 @@
 // it prints the live RMS so you can pick a value just above your idle reading.
 #define SILENCE_RMS    18.0
 
+// ----- Power / thermal management -------------------------------------------
+#define PROBE_SAMPLES   128     // cheap silence probe (~3 ms)
+#define SILENT_POLL_MS  150     // nap between probes while silent
+#define CPU_IDLE_MHZ    80      // clock while silent (80 MHz = WiFi minimum)
+#define CPU_ACTIVE_MHZ  160     // clock while music plays (use 240 for max performance, but hotter)
+
 double vReal[SAMPLES];
 double vImag[SAMPLES];
 
@@ -202,6 +208,17 @@ static void serviceDiscovery() {
   }
 }
 
+// Check for sound
+static double probeLevel() {
+  int s[PROBE_SAMPLES];
+  long sum = 0;
+  for (int i = 0; i < PROBE_SAMPLES; i++) { s[i] = analogRead(ADC_PIN); sum += s[i]; }
+  double mean = (double)sum / PROBE_SAMPLES;
+  double sumSq = 0;
+  for (int i = 0; i < PROBE_SAMPLES; i++) { double d = s[i] - mean; sumSq += d * d; }
+  return sqrt(sumSq / PROBE_SAMPLES);
+}
+
 // ----- Setup ----------------------------------------------------------------
 void setup() {
   Serial.begin(115200);
@@ -222,6 +239,26 @@ void loop() {
 
   serviceDiscovery();
 
+  // --- Cheap silence probe ---
+  double rms = probeLevel();
+
+  // Print the live RMS ~2x/s so the silence gate can be calibrated
+  static unsigned long lastRmsPrint = 0;
+  if (millis() - lastRmsPrint > 500) {
+    lastRmsPrint = millis();
+    Serial.printf("rms=%.1f agc=%.0f %uMHz %s\n", rms, agc,
+                  getCpuFrequencyMhz(), rms < SILENCE_RMS ? "[SILENT]" : "");
+  }
+
+  if (rms < SILENCE_RMS) {
+    if (getCpuFrequencyMhz() != CPU_IDLE_MHZ) setCpuFrequencyMhz(CPU_IDLE_MHZ);
+    delay(SILENT_POLL_MS);
+    return;
+  }
+
+  // Music present: run at full speed for a snappy visualizer.
+  if (getCpuFrequencyMhz() != CPU_ACTIVE_MHZ) setCpuFrequencyMhz(CPU_ACTIVE_MHZ);
+
   // 1) Sample at a regular rate
   for (int i = 0; i < SAMPLES; i++) {
     unsigned long t = micros();
@@ -230,27 +267,11 @@ void loop() {
     while (micros() - t < samplingPeriodUs) { /* busy-wait to keep the rhythm */ }
   }
 
-  // 2) Remove DC component (resting point ~2048) and measure AC level (RMS)
+  // 2) Remove DC component (resting point ~2048)
   double mean = 0;
   for (int i = 0; i < SAMPLES; i++) mean += vReal[i];
   mean /= SAMPLES;
-  double sumSq = 0;
-  for (int i = 0; i < SAMPLES; i++) {
-    vReal[i] -= mean;
-    sumSq += vReal[i] * vReal[i];
-  }
-  double rms = sqrt(sumSq / SAMPLES);
-
-  // Print the live RMS ~2x/s so the silence gate can be calibrated
-  static unsigned long lastRmsPrint = 0;
-  if (millis() - lastRmsPrint > 500) {
-    lastRmsPrint = millis();
-    Serial.printf("rms=%.1f agc=%.0f %s\n", rms, agc, rms < SILENCE_RMS ? "[SILENT]" : "");
-  }
-
-  // Silence gate: stop streaming (display reverts to clock) and FREEZE the AGC
-  // so it never recalibrates onto ADC noise. Sampling resumes next iteration.
-  if (rms < SILENCE_RMS) return;
+  for (int i = 0; i < SAMPLES; i++) vReal[i] -= mean;
 
   // 3) FFT
   FFT.windowing(FFTWindow::Hamming, FFTDirection::Forward);
